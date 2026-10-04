@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R voice - Voice Bill Checker</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #121212; color: #ffffff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .container { width: 100%; max-width: 450px; background: #1e1e1e; padding: 25px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid #333; text-align: center; }
+        h1 { color: #2196f3; font-size: 32px; margin-bottom: 5px; letter-spacing: 1px; }
+        .subtitle { color: #aaa; font-size: 14px; margin-bottom: 25px; }
+        .btn-mic { background: #2196f3; border: none; width: 80px; height: 80px; border-radius: 50%; color: white; font-size: 32px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(33, 150, 243, 0.4); display: inline-flex; align-items: center; justify-content: center; }
+        .btn-mic.listening { background: #f44336; animation: pulse 1.5s infinite; box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4); }
+        .status { margin: 15px 0; color: #ffeb3b; font-weight: bold; min-height: 24px; font-size: 15px; }
+        .bill-box { background: #252525; border-radius: 12px; padding: 15px; margin-top: 20px; text-align: left; max-height: 250px; overflow-y: auto; border: 1px solid #444; }
+        .bill-item { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 8px 0; font-size: 16px; }
+        .bill-item:last-child { border-bottom: none; }
+        .total-box { margin-top: 20px; padding: 15px; background: #1976d2; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 22px; font-weight: bold; }
+        .btn-clear { background: transparent; border: 1px solid #f44336; color: #f44336; padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 15px; font-weight: bold; width: 100%; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn-clear:hover { background: #f44336; color: white; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🎙️ R voice</h1>
+    <div class="subtitle">Smart Voice-Driven Bill Calculator</div>
+    
+    <button id="micBtn" class="btn-mic">🎙️</button>
+    <div id="status" class="status">Tap the microphone button to start speaking...</div>
+
+    <div class="bill-box" id="billBox">
+        <div style="color: #666; text-align: center; padding: 20px;">No items added yet.</div>
+    </div>
+
+    <div class="total-box">
+        <span>Total:</span>
+        <span id="totalAmount">₹0</span>
+    </div>
+
+    <button id="clearBtn" class="btn-clear">Clear List</button>
+</div>
+
+<script>
+    // 1. Speech Recognition Setup
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+        alert("Speech recognition is not supported in this browser. Please use Google Chrome.");
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'kn-IN'; // Keeps backend listening capability for Kannada speech
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    // Kannada Word-to-Number mapping logic
+    const kannadaNumbers = {
+        'ಒಂದು': 1, 'ನೂರು': 100, 'ಐವತ್ತು': 50, 'ನಲವತ್ತು': 40, 'ಮೂವತ್ತು': 30, 'ಇಪ್ಪತ್ತು': 20, 'ಹತ್ತು': 10,
+        'ನೂರ': 100, 'ದ್ವಿ': 2, 'ಮೂರು': 3, 'ನಾಲ್ಕು': 4, 'ಐದು': 5, 'ಆರು': 6, 'ಏಳು': 7, 'ಎಂಟು': 8, 'ಒಂಬತ್ತು': 9
+    };
+
+    let itemsList = [];
+    let isListening = false;
+
+    const micBtn = document.getElementById('micBtn');
+    const statusDiv = document.getElementById('status');
+    const billBox = document.getElementById('billBox');
+    const totalAmountSpan = document.getElementById('totalAmount');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // 2. Microphone Event Listener
+    micBtn.addEventListener('click', () => {
+        if (!isListening) {
+            recognition.start();
+        } else {
+            recognition.stop();
+        }
+    });
+
+    recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add('listening');
+        statusDiv.innerText = "Listening... Speak now (e.g., 'Akki 100', 'Bele 50')";
+    };
+
+    recognition.onend = () => {
+        isListening = false;
+        micBtn.classList.remove('listening');
+        statusDiv.innerText = "Microphone is OFF. Tap to speak again.";
+    };
+
+    // 3. Handle Voice Results
+    recognition.onresult = (event) => {
+        const resultIndex = event.resultIndex;
+        const speechResult = event.results[resultIndex].transcript.toLowerCase().trim();
+        console.log("Speech Input Log:", speechResult);
+        
+        parseSpeech(speechResult);
+    };
+
+    // 4. Core Parsing Engine
+    function parseSpeech(text) {
+        let cleanText = text.replace(/ರೂಪಾಯಿ|ರೂಪಾಯಿಗಳು|rupees|rupee/g, "").trim();
+        let words = cleanText.split(/\s+/);
+        
+        for (let i = 0; i < words.length; i++) {
+            let word = words[i];
+            let price = null;
+
+            // Check for direct digit input
+            if (!isNaN(word) && word !== "") {
+                price = parseFloat(word);
+            } 
+            // Check for native Kannada text numbers
+            else if (kannadaNumbers[word]) {
+                price = kannadaNumbers[word];
+            }
+
+            if (price !== null && i > 0) {
+                let itemName = words[i - 1];
+                itemsList.push({ name: itemName, price: price });
+                updateUI();
+            }
+        }
+    }
+
+    // 5. Render Dynamic Interface updates
+    function updateUI() {
+        if (itemsList.length === 0) {
+            billBox.innerHTML = `<div style="color: #666; text-align: center; padding: 20px;">No items added yet.</div>`;
+            totalAmountSpan.innerText = "₹0";
+            return;
+        }
+
+        billBox.innerHTML = "";
+        let total = 0;
+
+        itemsList.forEach((item) => {
+            total += item.price;
+            const itemRow = document.createElement('div');
+            itemRow.className = 'bill-item';
+            itemRow.innerHTML = `<span>🛒 ${item.name}</span> <span>₹${item.price}</span>`;
+            billBox.appendChild(itemRow);
+        });
+
+        totalAmountSpan.innerText = "₹" + total;
+        speakTotal(total);
+    }
+
+    // 6. Audio Response Trigger (Text-to-Speech in Kannada)
+    function speakTotal(total) {
+        const utterance = new SpeechSynthesisUtterance(`ನಿಮ್ಮ ಒಟ್ಟು ಬಿಲ್ ${total} ರೂಪಾಯಿಗಳು`);
+        utterance.lang = 'kn-IN';
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // 7. Reset State Configuration
+    clearBtn.addEventListener('click', () => {
+        itemsList = [];
+        updateUI();
+        statusDiv.innerText = "List cleared successfully.";
+    });
+</script>
+
+</body>
+</html>
